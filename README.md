@@ -88,19 +88,19 @@ This will:
 === 데이터 로드 완료 ===
   노드 수    : 2708
   피처 차원  : 1433
-  하이퍼엣지 : 2708
+  하이퍼엣지 : ~1500–2200  (citation-context 기반, 데이터에 따라 다름)
   클래스 수  : 7
   Train/Val/Test : 140 / 500 / 1000
 
 === Laplacian 계산 완료 ===
 
 === 학습 시작 ===
-Epoch  10 | Loss: 1.8432 | Train Acc: 0.6571 | Val Acc: 0.4120
+Epoch  10 | Loss: x.xxxx | Train Acc: x.xxxx | Val Acc: x.xxxx
 ...
-Epoch 200 | Loss: 0.2145 | Train Acc: 0.9929 | Val Acc: 0.7680
+Epoch 200 | Loss: x.xxxx | Train Acc: x.xxxx | Val Acc: x.xxxx
 === 학습 완료 ===
 
-=== 최종 테스트 정확도: 0.7650 ===
+=== 최종 테스트 정확도: x.xxxx ===
 ```
 
 ---
@@ -119,7 +119,19 @@ To switch datasets, edit `main.m`:
 dataset = 'toy';   % 'toy' | 'cora' | 'custom'
 ```
 
----
+### Hyperedge Construction (Cora)
+
+Cora의 하이퍼엣지는 **citation-context** 방식으로 구성됩니다:
+
+```
+논문 A를 인용하는 논문들: {B, C, D}
+   → 하이퍼엣지 = {A, B, C, D}
+```
+
+각 피인용 논문에 대해, 해당 논문과 그것을 인용하는 모든 논문이 하나의 하이퍼엣지를 형성합니다. 이를 통해 "같은 논문을 참조하는 논문 그룹"이라는 의미 있는 고차(higher-order) 관계를 포착합니다.
+
+> **Note:** 어떤 하이퍼엣지에도 속하지 않는 고립 노드에는 싱글턴 하이퍼엣지가 자동으로 추가됩니다.
+
 
 ## Hyperparameters
 

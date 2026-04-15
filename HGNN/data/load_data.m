@@ -127,6 +127,15 @@ function [paper_ids, X, labels] = read_cora_content(content_file)
 end
 
 function H = build_cora_hypergraph(cites_file, paper_ids)
+% BUILD_CORA_HYPERGRAPH  Citation-context 기반 하이퍼그래프 구성
+%
+%   각 "피인용 논문"에 대해 {피인용 논문} ∪ {인용 논문들}을 하나의
+%   하이퍼엣지로 묶습니다. 같은 논문을 인용하는 논문들이 하나의
+%   하이퍼엣지를 공유하므로 진정한 고차(higher-order) 관계를 포착합니다.
+%
+%   기존 star-expansion 방식(A + I → spones)과 달리, 하이퍼엣지 수가
+%   노드 수와 동일해지는 문제를 해결합니다.
+
     num_nodes = numel(paper_ids);
     id_map = containers.Map(paper_ids, num2cell(1:num_nodes));
 
@@ -137,23 +146,56 @@ function H = build_cora_hypergraph(cites_file, paper_ids)
     cite_pairs = textscan(fid, '%s%s');
     fclose(fid);
 
-    cited_ids = cite_pairs{1};
+    cited_ids  = cite_pairs{1};
     citing_ids = cite_pairs{2};
-    row_idx = [];
-    col_idx = [];
+
+    % -------------------------------------------------------------------
+    % 1. Citation context 수집: 피인용 논문 → 인용 논문 리스트
+    % -------------------------------------------------------------------
+    cite_map = containers.Map();   % key: 피인용 노드 인덱스(문자열)
+                                   % val: 인용 노드 인덱스 배열
 
     for i = 1:numel(cited_ids)
-        if isKey(id_map, cited_ids{i}) && isKey(id_map, citing_ids{i})
-            cited = id_map(cited_ids{i});
-            citing = id_map(citing_ids{i});
+        if ~isKey(id_map, cited_ids{i}) || ~isKey(id_map, citing_ids{i})
+            continue;
+        end
+        cited  = id_map(cited_ids{i});
+        citing = id_map(citing_ids{i});
 
-            row_idx = [row_idx, cited, citing]; %#ok<AGROW>
-            col_idx = [col_idx, citing, cited]; %#ok<AGROW>
+        key = num2str(cited);
+        if isKey(cite_map, key)
+            cite_map(key) = [cite_map(key), citing];
+        else
+            cite_map(key) = citing;
         end
     end
 
-    A = sparse(row_idx, col_idx, 1, num_nodes, num_nodes);
-    H = spones(A + speye(num_nodes));
+    % -------------------------------------------------------------------
+    % 2. 하이퍼엣지 생성: {피인용 논문} ∪ {인용 논문들}
+    % -------------------------------------------------------------------
+    keys   = cite_map.keys();
+    num_he = numel(keys);
+    hyperedges = cell(num_he, 1);
+
+    for i = 1:num_he
+        cited_node = str2double(keys{i});
+        citers     = cite_map(keys{i});
+        hyperedges{i} = unique([cited_node, citers]);
+    end
+
+    % -------------------------------------------------------------------
+    % 3. 고립 노드 처리: 하이퍼엣지에 속하지 않는 노드 → 싱글턴 하이퍼엣지
+    % -------------------------------------------------------------------
+    covered = false(num_nodes, 1);
+    for i = 1:num_he
+        covered(hyperedges{i}) = true;
+    end
+    isolated = find(~covered);
+    for i = 1:numel(isolated)
+        hyperedges{end+1} = isolated(i); %#ok<AGROW>
+    end
+
+    H = build_incidence_matrix(hyperedges, num_nodes);
 end
 
 function Y = labels_to_onehot(labels)
