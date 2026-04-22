@@ -88,7 +88,7 @@ This will:
 === 데이터 로드 완료 ===
   노드 수    : 2708
   피처 차원  : 1433
-  하이퍼엣지 : ~1500–2200  (citation-context 기반, 데이터에 따라 다름)
+  하이퍼엣지 : ~1100–1300  (research-group 기준값에 따라 다름)
   클래스 수  : 7
   Train/Val/Test : 140 / 500 / 1000
 
@@ -121,16 +121,24 @@ dataset = 'toy';   % 'toy' | 'cora' | 'custom'
 
 ### Hyperedge Construction (Cora)
 
-Cora의 하이퍼엣지는 **citation-context** 방식으로 구성됩니다:
+Cora의 하이퍼엣지는 **자주 인용되는 논문 중심의 research-group** 방식으로 구성됩니다:
 
 ```
-논문 A를 인용하는 논문들: {B, C, D}
-   → 하이퍼엣지 = {A, B, C, D}
+논문 A가 5회 이상 인용됨
+논문 A를 인용하는 논문들: {B, C, D, E, ...}
+   → 연구 그룹 하이퍼엣지 = {A, B, C, D, E, ...}
 ```
 
-각 피인용 논문에 대해, 해당 논문과 그것을 인용하는 모든 논문이 하나의 하이퍼엣지를 형성합니다. 이를 통해 "같은 논문을 참조하는 논문 그룹"이라는 의미 있는 고차(higher-order) 관계를 포착합니다.
+기본 설정에서는 피인용 횟수가 `min_group_citations = 5` 이상인 논문을 연구 그룹의 seed로 사용합니다. 즉, 많이 인용되는 핵심 논문과 그 논문을 인용한 논문들을 하나의 하이퍼엣지로 묶어, 같은 연구 흐름을 공유하는 논문 그룹을 고차(higher-order) 관계로 표현합니다.
 
-> **Note:** 어떤 하이퍼엣지에도 속하지 않는 고립 노드에는 싱글턴 하이퍼엣지가 자동으로 추가됩니다.
+기준값은 `main.m`에서 조정할 수 있습니다:
+
+```matlab
+data_options.min_group_citations = 5;
+data_options.include_singletons  = true;
+```
+
+> **Note:** 어떤 연구 그룹 하이퍼엣지에도 속하지 않는 노드에는 싱글턴 하이퍼엣지가 자동으로 추가됩니다.
 
 
 ## Hyperparameters

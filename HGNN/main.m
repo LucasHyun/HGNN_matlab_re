@@ -19,7 +19,14 @@ addpath(fullfile(project_root, 'data'), ...
 % 1. 데이터 로드
 % -------------------------------------------------------------------------
 dataset = 'cora';  % 'toy' | 'cora' | 'custom'
-[X, H, Y_true, train_mask, val_mask, test_mask] = load_data(dataset);
+
+% Cora 하이퍼엣지 생성 옵션
+% - min_group_citations 이상 인용된 논문을 연구 그룹 seed로 사용
+% - seed 논문 + 해당 논문을 인용한 논문들을 하나의 하이퍼엣지로 묶음
+data_options.min_group_citations = 5;
+data_options.include_singletons  = true;
+
+[X, H, Y_true, train_mask, val_mask, test_mask] = load_data(dataset, data_options);
 
 fprintf('=== 데이터 로드 완료 ===\n');
 fprintf('  노드 수    : %d\n', size(X, 1));

@@ -1,8 +1,9 @@
-function [X, H, Y_true, train_mask, val_mask, test_mask] = load_data(dataset_name)
+function [X, H, Y_true, train_mask, val_mask, test_mask] = load_data(dataset_name, options)
 % LOAD_DATA  데이터셋 로드 및 전처리
 %
 % 입력:
 %   dataset_name : 문자열 ('toy' | 'cora' | 'custom')
+%   options      : 데이터셋별 옵션 구조체 (생략 가능)
 %
 % 출력:
 %   X          : (N x F)   노드 피처 행렬
@@ -11,6 +12,10 @@ function [X, H, Y_true, train_mask, val_mask, test_mask] = load_data(dataset_nam
 %   train_mask : (N x 1)   학습 노드 마스크
 %   val_mask   : (N x 1)   검증 노드 마스크
 %   test_mask  : (N x 1)   테스트 노드 마스크
+
+if nargin < 2 || isempty(options)
+    options = struct();
+end
 
 switch lower(dataset_name)
 
@@ -63,7 +68,7 @@ switch lower(dataset_name)
         end
 
         [paper_ids, X, labels] = read_cora_content(content_file);
-        H = build_cora_hypergraph(cites_file, paper_ids);
+        H = build_cora_hypergraph(cites_file, paper_ids, options);
         Y_true = labels_to_onehot(labels);
         [train_mask, val_mask, test_mask] = split_masks(labels);
 
@@ -126,18 +131,27 @@ function [paper_ids, X, labels] = read_cora_content(content_file)
     end
 end
 
-function H = build_cora_hypergraph(cites_file, paper_ids)
-% BUILD_CORA_HYPERGRAPH  Citation-context 기반 하이퍼그래프 구성
+function H = build_cora_hypergraph(cites_file, paper_ids, options)
+% BUILD_CORA_HYPERGRAPH  자주 인용된 논문 중심 연구 그룹 하이퍼그래프 구성
 %
-%   각 "피인용 논문"에 대해 {피인용 논문} ∪ {인용 논문들}을 하나의
-%   하이퍼엣지로 묶습니다. 같은 논문을 인용하는 논문들이 하나의
-%   하이퍼엣지를 공유하므로 진정한 고차(higher-order) 관계를 포착합니다.
+%   많이 인용된 논문을 연구 그룹 seed로 보고,
+%   {seed 논문} ∪ {seed 논문을 인용한 논문들}을 하나의 하이퍼엣지로 묶습니다.
 %
-%   기존 star-expansion 방식(A + I → spones)과 달리, 하이퍼엣지 수가
-%   노드 수와 동일해지는 문제를 해결합니다.
+%   options.min_group_citations : seed로 사용할 최소 피인용 횟수 (기본 5)
+%   options.max_research_groups : citation count 상위 seed 개수 제한 (기본 inf)
+%   options.include_singletons  : 어떤 연구 그룹에도 속하지 않는 노드를
+%                                 싱글턴 하이퍼엣지로 추가할지 여부 (기본 true)
 
     num_nodes = numel(paper_ids);
     id_map = containers.Map(paper_ids, num2cell(1:num_nodes));
+    if nargin < 3 || isempty(options)
+        options = struct();
+    end
+
+    min_group_citations = get_option(options, 'min_group_citations', 5);
+    min_group_citations = max(1, floor(min_group_citations));
+    max_research_groups = get_option(options, 'max_research_groups', inf);
+    include_singletons  = get_option(options, 'include_singletons', true);
 
     fid = fopen(cites_file, 'r');
     if fid < 0
@@ -154,6 +168,7 @@ function H = build_cora_hypergraph(cites_file, paper_ids)
     % -------------------------------------------------------------------
     cite_map = containers.Map();   % key: 피인용 노드 인덱스(문자열)
                                    % val: 인용 노드 인덱스 배열
+    citation_count = zeros(num_nodes, 1);
 
     for i = 1:numel(cited_ids)
         if ~isKey(id_map, cited_ids{i}) || ~isKey(id_map, citing_ids{i})
@@ -161,6 +176,7 @@ function H = build_cora_hypergraph(cites_file, paper_ids)
         end
         cited  = id_map(cited_ids{i});
         citing = id_map(citing_ids{i});
+        citation_count(cited) = citation_count(cited) + 1;
 
         key = num2str(cited);
         if isKey(cite_map, key)
@@ -171,28 +187,44 @@ function H = build_cora_hypergraph(cites_file, paper_ids)
     end
 
     % -------------------------------------------------------------------
-    % 2. 하이퍼엣지 생성: {피인용 논문} ∪ {인용 논문들}
+    % 2. 연구 그룹 seed 선택: 자주 인용된 논문
     % -------------------------------------------------------------------
-    keys   = cite_map.keys();
-    num_he = numel(keys);
-    hyperedges = cell(num_he, 1);
+    seed_nodes = find(citation_count >= min_group_citations);
+    [~, order] = sort(citation_count(seed_nodes), 'descend');
+    seed_nodes = seed_nodes(order);
 
-    for i = 1:num_he
-        cited_node = str2double(keys{i});
-        citers     = cite_map(keys{i});
+    if isfinite(max_research_groups)
+        max_research_groups = max(0, floor(max_research_groups));
+        seed_nodes = seed_nodes(1:min(max_research_groups, numel(seed_nodes)));
+    end
+
+    % -------------------------------------------------------------------
+    % 3. 연구 그룹 하이퍼엣지 생성: {seed 논문} ∪ {인용 논문들}
+    % -------------------------------------------------------------------
+    hyperedges = cell(numel(seed_nodes), 1);
+    for i = 1:numel(seed_nodes)
+        cited_node = seed_nodes(i);
+        key = num2str(cited_node);
+        if isKey(cite_map, key)
+            citers = cite_map(key);
+        else
+            citers = [];
+        end
         hyperedges{i} = unique([cited_node, citers]);
     end
 
     % -------------------------------------------------------------------
-    % 3. 고립 노드 처리: 하이퍼엣지에 속하지 않는 노드 → 싱글턴 하이퍼엣지
+    % 4. 고립 노드 처리: 연구 그룹에 속하지 않는 노드 → 싱글턴 하이퍼엣지
     % -------------------------------------------------------------------
-    covered = false(num_nodes, 1);
-    for i = 1:num_he
-        covered(hyperedges{i}) = true;
-    end
-    isolated = find(~covered);
-    for i = 1:numel(isolated)
-        hyperedges{end+1} = isolated(i); %#ok<AGROW>
+    if include_singletons
+        covered = false(num_nodes, 1);
+        for i = 1:numel(hyperedges)
+            covered(hyperedges{i}) = true;
+        end
+        isolated = find(~covered);
+        for i = 1:numel(isolated)
+            hyperedges{end+1} = isolated(i); %#ok<AGROW>
+        end
     end
 
     H = build_incidence_matrix(hyperedges, num_nodes);
@@ -241,4 +273,12 @@ function X_norm = normalize_rows(X)
     row_sum = sum(X, 2);
     row_sum(row_sum == 0) = 1;
     X_norm = spdiags(1 ./ row_sum, 0, size(X, 1), size(X, 1)) * X;
+end
+
+function val = get_option(options, field, default)
+    if isstruct(options) && isfield(options, field) && ~isempty(options.(field))
+        val = options.(field);
+    else
+        val = default;
+    end
 end
