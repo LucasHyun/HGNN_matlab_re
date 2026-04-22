@@ -260,6 +260,7 @@ All hyperparameters are configured in `main.m`:
 ## References
 
 - Feng, Y., You, H., Zhang, Z., Ji, R., & Gao, Y. (2019). *Hypergraph Neural Networks.* AAAI 2019. [[Paper]](https://arxiv.org/abs/1809.09401)
+- Reference implementation: [iMoonLab/HGNN](https://github.com/iMoonLab/HGNN)
 
 ---
 
