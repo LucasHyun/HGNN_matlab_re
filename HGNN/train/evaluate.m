@@ -1,14 +1,14 @@
 function [accuracy, pred_labels] = evaluate(Y_pred, Y_true, mask)
-% EVALUATE  노드 분류 정확도 평가
+% EVALUATE  Evaluate node-classification accuracy
 %
-% 입력:
-%   Y_pred : (N x C)  softmax 출력 (클래스 확률)
-%   Y_true : (N x C)  one-hot 정답 레이블
-%   mask   : (N x 1)  평가할 노드 마스크 (생략 시 전체)
+% Inputs:
+%   Y_pred : (N x C) softmax output with class probabilities
+%   Y_true : (N x C) one-hot ground-truth labels
+%   mask   : (N x 1) node mask to evaluate; uses all nodes when omitted.
 %
-% 출력:
-%   accuracy    : 스칼라, 정확도 (0~1)
-%   pred_labels : (N x 1) 예측 클래스 인덱스
+% Outputs:
+%   accuracy    : scalar accuracy in the range [0, 1]
+%   pred_labels : (N x 1) predicted class indices
 
 if nargin < 3 || isempty(mask)
     mask = true(size(Y_pred, 1), 1);
@@ -17,7 +17,7 @@ mask = logical(mask(:));
 
 num_eval = sum(mask);
 if num_eval == 0
-    error('evaluate: mask에 포함된 노드가 없습니다.');
+    error('evaluate: the mask does not include any nodes.');
 end
 
 [~, pred_labels] = max(Y_pred, [], 2);

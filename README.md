@@ -78,30 +78,114 @@ Open MATLAB, navigate to the project root, and execute:
 
 This will:
 1. Load the **Cora** citation dataset (2,708 nodes, 7 classes)
-2. Build the incidence matrix and compute the Laplacian
+2. Build the incidence matrix and compute the normalized propagation matrix
 3. Train the HGNN for 200 epochs with Adam optimizer
 4. Report the final test accuracy
 
 ### Expected Output
 
 ```
-=== 데이터 로드 완료 ===
-  노드 수    : 2708
-  피처 차원  : 1433
-  하이퍼엣지 : ~1100–1300  (research-group 기준값에 따라 다름)
-  클래스 수  : 7
+=== Data loaded ===
+  Nodes      : 2708
+  Features   : 1433
+  Hyperedges : ~1100-1300  (depends on the research-group threshold)
+  Classes    : 7
   Train/Val/Test : 140 / 500 / 1000
 
-=== Laplacian 계산 완료 ===
+=== Propagation matrix computed ===
 
-=== 학습 시작 ===
+=== Training started ===
 Epoch  10 | Loss: x.xxxx | Train Acc: x.xxxx | Val Acc: x.xxxx
 ...
 Epoch 200 | Loss: x.xxxx | Train Acc: x.xxxx | Val Acc: x.xxxx
-=== 학습 완료 ===
+=== Training completed ===
 
-=== 최종 테스트 정확도: x.xxxx ===
+=== Final test accuracy: x.xxxx ===
 ```
+
+---
+
+## How It Works
+
+### 1. Entry Point
+
+`HGNN/main.m` is the full pipeline driver. It adds the `data`, `graph`, `model`, and `train` folders to the MATLAB path, selects a dataset, configures Cora-specific hyperedge options, and then runs data loading, graph construction, training, and final testing.
+
+The main outputs passed through the pipeline are:
+
+| Variable | Shape | Meaning |
+|----------|-------|---------|
+| `X` | `N x F` | Node-feature matrix. For Cora, each row is a normalized bag-of-words feature vector for one paper. |
+| `H` | `N x E` | Sparse incidence matrix. `H(i,e)=1` means node `i` belongs to hyperedge `e`. |
+| `Y_true` | `N x C` | One-hot class labels. |
+| `train_mask` | `N x 1` | Boolean mask for labeled training nodes. |
+| `val_mask` | `N x 1` | Boolean mask for validation nodes. |
+| `test_mask` | `N x 1` | Boolean mask for final test nodes. |
+
+### 2. Data Loading
+
+`load_data.m` supports three dataset modes:
+
+- `toy`: creates a small synthetic hypergraph with class-centered features. This is useful for quick sanity checks because it runs almost immediately.
+- `cora`: reads `cora.content` and `cora.cites`, converts paper labels to one-hot vectors, normalizes feature rows, builds research-group hyperedges, and creates train/validation/test masks.
+- `custom`: reserved for user-defined datasets. This branch intentionally raises an error until a custom loader is implemented.
+
+For Cora, `read_cora_content` parses each paper ID, feature vector, and class label from `cora.content`. Features are stored as a sparse matrix and row-normalized so each paper feature vector has comparable scale.
+
+### 3. Hypergraph Construction
+
+The Cora citation file describes pairwise citation relations, but HGNN needs hyperedges that can connect more than two nodes. This implementation turns citations into research-group hyperedges:
+
+1. Count how often each paper is cited.
+2. Select papers with citation count greater than or equal to `min_group_citations`.
+3. For each selected seed paper, create one hyperedge containing the seed paper and every paper that cites it.
+4. Optionally add singleton hyperedges for papers that do not appear in any research-group hyperedge.
+
+This converts local citation neighborhoods into higher-order groups. A single propagation step can then move information across all papers in the same research context, not just across one citation edge at a time.
+
+### 4. Propagation Matrix
+
+`compute_laplacian.m` converts the incidence matrix `H` into the normalized HGNN propagation matrix:
+
+$$\Theta = D_v^{-1/2} \cdot H \cdot W \cdot D_e^{-1} \cdot H^\top \cdot D_v^{-1/2}$$
+
+The intermediate matrices mean:
+
+- `W`: diagonal hyperedge-weight matrix. If no weights are provided, all hyperedges receive weight `1`.
+- `D_v`: diagonal node-degree matrix. A node degree is the weighted number of hyperedges that contain the node.
+- `D_e`: diagonal hyperedge-degree matrix. A hyperedge degree is the number of nodes inside that hyperedge.
+- `Theta_conv`: normalized propagation matrix used by every HGNN layer.
+
+The normalization prevents high-degree nodes or large hyperedges from dominating feature propagation.
+
+### 5. Forward Pass
+
+The model is a two-layer HGNN:
+
+```matlab
+H1     = ReLU(Theta_conv * X  * W1)
+Y_pred = Softmax(Theta_conv * H1 * W2)
+```
+
+`hgnn_layer.m` handles one layer by applying hypergraph propagation, a learnable linear transform, and an activation. `hgnn_forward.m` chains two layers and returns both predictions and cached intermediate values for backpropagation.
+
+### 6. Training Loop
+
+`train.m` performs manual training without a deep learning toolbox:
+
+1. Initialize `W1` and `W2` with Xavier initialization.
+2. Run the forward pass.
+3. Compute masked cross-entropy loss on `train_mask` nodes only.
+4. Run `hgnn_backward.m` to compute gradients.
+5. Add L2 weight-decay gradients.
+6. Update weights with Adam.
+7. Print train and validation accuracy every `print_every` epochs.
+
+Validation nodes are never used to compute the training loss. They are only used for progress reporting during training.
+
+### 7. Final Evaluation
+
+After training, `main.m` runs one final forward pass and calls `evaluate.m` with `test_mask`. The reported test accuracy is therefore computed only on the held-out test nodes.
 
 ---
 
@@ -121,24 +205,31 @@ dataset = 'toy';   % 'toy' | 'cora' | 'custom'
 
 ### Hyperedge Construction (Cora)
 
-Cora의 하이퍼엣지는 **자주 인용되는 논문 중심의 research-group** 방식으로 구성됩니다:
+Cora hyperedges are built with a **research-group construction centered on frequently cited papers**:
 
 ```
-논문 A가 5회 이상 인용됨
-논문 A를 인용하는 논문들: {B, C, D, E, ...}
-   → 연구 그룹 하이퍼엣지 = {A, B, C, D, E, ...}
+Paper A is cited at least 5 times.
+Papers that cite Paper A: {B, C, D, E, ...}
+   -> Research-group hyperedge = {A, B, C, D, E, ...}
 ```
 
-기본 설정에서는 피인용 횟수가 `min_group_citations = 5` 이상인 논문을 연구 그룹의 seed로 사용합니다. 즉, 많이 인용되는 핵심 논문과 그 논문을 인용한 논문들을 하나의 하이퍼엣지로 묶어, 같은 연구 흐름을 공유하는 논문 그룹을 고차(higher-order) 관계로 표현합니다.
+By default, a paper becomes a research-group seed when it has at least `min_group_citations = 5` incoming citations. The seed and the papers that cite it are grouped into one hyperedge, representing a higher-order relationship among papers that share a research direction.
 
-기준값은 `main.m`에서 조정할 수 있습니다:
+The threshold can be adjusted in `main.m`:
 
 ```matlab
 data_options.min_group_citations = 5;
 data_options.include_singletons  = true;
 ```
 
-> **Note:** 어떤 연구 그룹 하이퍼엣지에도 속하지 않는 노드에는 싱글턴 하이퍼엣지가 자동으로 추가됩니다.
+Useful behavior changes:
+
+- Lower `min_group_citations` to create more research-group hyperedges.
+- Raise `min_group_citations` to keep only stronger citation groups.
+- Set `max_research_groups` to limit how many high-citation seeds are used.
+- Set `include_singletons = false` to skip isolated papers that do not belong to any research-group hyperedge.
+
+> **Note:** When `include_singletons = true`, nodes that do not belong to any research-group hyperedge are automatically added as singleton hyperedges.
 
 
 ## Hyperparameters

@@ -1,14 +1,14 @@
 function grads = hgnn_backward(dZ2, caches, Theta_conv, weights)
 % HGNN_BACKWARD  2-layer HGNN backward pass
 %
-% 입력:
+% Inputs:
 %   dZ2        : (N x C)      softmax + cross-entropy gradient
-%   caches     : forward pass에서 저장한 layer cache
-%   Theta_conv : (N x N)      정규화 전파 행렬
-%   weights    : 구조체 (.W1, .W2)
+%   caches     : layer caches saved during the forward pass
+%   Theta_conv : (N x N)      normalized propagation matrix
+%   weights    : struct (.W1, .W2)
 %
-% 출력:
-%   grads : 구조체 (.W1, .W2)
+% Outputs:
+%   grads : struct (.W1, .W2)
 
 cache1 = caches{1};
 cache2 = caches{2};

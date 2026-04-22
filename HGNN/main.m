@@ -1,10 +1,10 @@
-% MAIN.M  HGNN 전체 파이프라인 실행
+% MAIN.M  Run the complete HGNN pipeline
 % =========================================================================
-%  실행 순서:
-%   1. 데이터 로드
-%   2. Incidence matrix & Laplacian 계산
-%   3. 학습
-%   4. 테스트 평가
+%  Execution order:
+%   1. Load the dataset
+%   2. Build the incidence matrix and normalized propagation matrix
+%   3. Train the HGNN
+%   4. Evaluate on the test split
 % =========================================================================
 
 clc; clear; close all;
@@ -16,35 +16,35 @@ addpath(fullfile(project_root, 'data'), ...
         fullfile(project_root, 'train'));
 
 %% -------------------------------------------------------------------------
-% 1. 데이터 로드
+% 1. Load data
 % -------------------------------------------------------------------------
 dataset = 'cora';  % 'toy' | 'cora' | 'custom'
 
-% Cora 하이퍼엣지 생성 옵션
-% - min_group_citations 이상 인용된 논문을 연구 그룹 seed로 사용
-% - seed 논문 + 해당 논문을 인용한 논문들을 하나의 하이퍼엣지로 묶음
+% Cora hyperedge construction options:
+% - Use papers cited at least min_group_citations times as research-group seeds.
+% - Each hyperedge contains the seed paper and the papers that cite it.
 data_options.min_group_citations = 5;
 data_options.include_singletons  = true;
 
 [X, H, Y_true, train_mask, val_mask, test_mask] = load_data(dataset, data_options);
 
-fprintf('=== 데이터 로드 완료 ===\n');
-fprintf('  노드 수    : %d\n', size(X, 1));
-fprintf('  피처 차원  : %d\n', size(X, 2));
-fprintf('  하이퍼엣지 : %d\n', size(H, 2));
-fprintf('  클래스 수  : %d\n', size(Y_true, 2));
+fprintf('=== Data loaded ===\n');
+fprintf('  Nodes      : %d\n', size(X, 1));
+fprintf('  Features   : %d\n', size(X, 2));
+fprintf('  Hyperedges : %d\n', size(H, 2));
+fprintf('  Classes    : %d\n', size(Y_true, 2));
 fprintf('  Train/Val/Test : %d / %d / %d\n', ...
         sum(train_mask), sum(val_mask), sum(test_mask));
 
 %% -------------------------------------------------------------------------
-% 2. 정규화 전파 행렬 계산
+% 2. Compute the normalized propagation matrix
 % -------------------------------------------------------------------------
 [Theta_conv, D_v, D_e, W] = compute_laplacian(H);
 
-fprintf('\n=== Laplacian 계산 완료 ===\n');
+fprintf('\n=== Propagation matrix computed ===\n');
 
 %% -------------------------------------------------------------------------
-% 3. 하이퍼파라미터 설정
+% 3. Configure hyperparameters
 % -------------------------------------------------------------------------
 params.lr           = 0.01;
 params.epochs       = 200;
@@ -53,16 +53,16 @@ params.weight_decay = 5e-4;
 params.print_every  = 10;
 
 %% -------------------------------------------------------------------------
-% 4. 학습
+% 4. Train
 % -------------------------------------------------------------------------
-fprintf('\n=== 학습 시작 ===\n');
+fprintf('\n=== Training started ===\n');
 weights = train(X, Theta_conv, Y_true, train_mask, val_mask, params);
-fprintf('=== 학습 완료 ===\n');
+fprintf('=== Training completed ===\n');
 
 %% -------------------------------------------------------------------------
-% 5. 테스트 평가
+% 5. Evaluate on the test split
 % -------------------------------------------------------------------------
 [Y_pred, ~] = hgnn_forward(X, Theta_conv, weights);
 [test_acc, ~] = evaluate(Y_pred, Y_true, test_mask);
 
-fprintf('\n=== 최종 테스트 정확도: %.4f ===\n', test_acc);
+fprintf('\n=== Final test accuracy: %.4f ===\n', test_acc);

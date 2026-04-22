@@ -1,17 +1,17 @@
 function [X, H, Y_true, train_mask, val_mask, test_mask] = load_data(dataset_name, options)
-% LOAD_DATA  데이터셋 로드 및 전처리
+% LOAD_DATA  Load and preprocess a dataset
 %
-% 입력:
-%   dataset_name : 문자열 ('toy' | 'cora' | 'custom')
-%   options      : 데이터셋별 옵션 구조체 (생략 가능)
+% Inputs:
+%   dataset_name : string ('toy' | 'cora' | 'custom')
+%   options      : dataset-specific option struct; optional
 %
-% 출력:
-%   X          : (N x F)   노드 피처 행렬
+% Outputs:
+%   X          : (N x F)   node-feature matrix
 %   H          : (N x E)   incidence matrix (sparse)
-%   Y_true     : (N x C)   one-hot 레이블
-%   train_mask : (N x 1)   학습 노드 마스크
-%   val_mask   : (N x 1)   검증 노드 마스크
-%   test_mask  : (N x 1)   테스트 노드 마스크
+%   Y_true     : (N x C)   one-hot labels
+%   train_mask : (N x 1)   training-node mask
+%   val_mask   : (N x 1)   validation-node mask
+%   test_mask  : (N x 1)   test-node mask
 
 if nargin < 2 || isempty(options)
     options = struct();
@@ -20,15 +20,15 @@ end
 switch lower(dataset_name)
 
     % -------------------------------------------------------------------
-    case 'toy'   % 간단한 합성 데이터 (구현 테스트용)
+    case 'toy'   % Small synthetic dataset for implementation checks
     % -------------------------------------------------------------------
         rng(7);
 
         num_nodes  = 12;
-        F          = 5;    % 피처 차원
-        C          = 3;    % 클래스 수
+        F          = 5;    % Feature dimension
+        C          = 3;    % Number of classes
 
-        % 클래스별 중심을 둔 피처. 랜덤 레이블보다 HGNN 동작 확인에 적합합니다.
+        % Class-centered features make HGNN behavior easier to verify than random labels.
         labels = [ones(4, 1); 2 * ones(4, 1); 3 * ones(4, 1)];
         centers = [2 0 0 1 0;
                    0 2 0 0 1;
@@ -41,29 +41,29 @@ switch lower(dataset_name)
                               + 0.05 * randn(length(class_idx), F);
         end
 
-        % 하이퍼엣지 정의
+        % Hyperedge definitions
         hyperedges = {[1,2,3,4], [5,6,7,8], [9,10,11,12], ...
                       [1,2,3], [6,7,8], [10,11,12]};
         H = build_incidence_matrix(hyperedges, num_nodes);
 
-        % 레이블 (one-hot)
+        % One-hot labels
         Y_true = full(sparse(1:num_nodes, labels', 1, num_nodes, C));
 
-        % 클래스마다 train/val/test가 포함되도록 고정 분할
+        % Fixed split that includes train/validation/test nodes for each class.
         train_mask = false(num_nodes, 1);  val_mask = false(num_nodes, 1);  test_mask = false(num_nodes, 1);
         train_mask([1,2,5,6,9,10]) = true;
         val_mask([3,7,11])         = true;
         test_mask([4,8,12])        = true;
 
     % -------------------------------------------------------------------
-    case 'cora'  % 실제 Cora citation dataset 로드
+    case 'cora'  % Load the real Cora citation dataset
     % -------------------------------------------------------------------
         data_dir = fullfile(fileparts(mfilename('fullpath')), 'cora');
         content_file = fullfile(data_dir, 'cora.content');
         cites_file = fullfile(data_dir, 'cora.cites');
 
         if ~exist(content_file, 'file') || ~exist(cites_file, 'file')
-            error(['load_data: Cora 파일이 없습니다. 다음 파일이 필요합니다:\n' ...
+            error(['load_data: Cora files are missing. The following files are required:\n' ...
                    '  %s\n  %s'], content_file, cites_file);
         end
 
@@ -73,13 +73,13 @@ switch lower(dataset_name)
         [train_mask, val_mask, test_mask] = split_masks(labels);
 
     % -------------------------------------------------------------------
-    case 'custom'  % 사용자 정의 데이터
+    case 'custom'  % User-defined data
     % -------------------------------------------------------------------
-        % TODO: 원하는 형식으로 교체
-        error('load_data: custom 로더를 직접 구현하세요.');
+        % TODO: replace this branch with the desired custom data format.
+        error('load_data: implement the custom loader before using dataset_name="custom".');
 
     otherwise
-        error('load_data: 알 수 없는 데이터셋 "%s"', dataset_name);
+        error('load_data: unknown dataset "%s"', dataset_name);
 end
 
 end
@@ -90,7 +90,7 @@ end
 function [paper_ids, X, labels] = read_cora_content(content_file)
     fid = fopen(content_file, 'r');
     if fid < 0
-        error('read_cora_content: 파일을 열 수 없습니다: %s', content_file);
+        error('read_cora_content: cannot open file: %s', content_file);
     end
     lines = textscan(fid, '%s', 'Delimiter', '\n', 'Whitespace', '');
     fclose(fid);
@@ -108,7 +108,7 @@ function [paper_ids, X, labels] = read_cora_content(content_file)
     for i = 1:num_nodes
         parts = strsplit(strtrim(lines{i}));
         if numel(parts) ~= num_features + 2
-            error('read_cora_content: %d번째 줄의 column 수가 올바르지 않습니다.', i);
+            error('read_cora_content: line %d has an unexpected number of columns.', i);
         end
 
         paper_ids{i} = parts{1};
@@ -132,15 +132,15 @@ function [paper_ids, X, labels] = read_cora_content(content_file)
 end
 
 function H = build_cora_hypergraph(cites_file, paper_ids, options)
-% BUILD_CORA_HYPERGRAPH  자주 인용된 논문 중심 연구 그룹 하이퍼그래프 구성
+% BUILD_CORA_HYPERGRAPH  Build research-group hyperedges around cited papers
 %
-%   많이 인용된 논문을 연구 그룹 seed로 보고,
-%   {seed 논문} ∪ {seed 논문을 인용한 논문들}을 하나의 하이퍼엣지로 묶습니다.
+%   Frequently cited papers are treated as research-group seeds.
+%   Each hyperedge is {seed paper} union {papers that cite the seed paper}.
 %
-%   options.min_group_citations : seed로 사용할 최소 피인용 횟수 (기본 5)
-%   options.max_research_groups : citation count 상위 seed 개수 제한 (기본 inf)
-%   options.include_singletons  : 어떤 연구 그룹에도 속하지 않는 노드를
-%                                 싱글턴 하이퍼엣지로 추가할지 여부 (기본 true)
+%   options.min_group_citations : minimum citation count for a seed (default 5)
+%   options.max_research_groups : max number of top citation-count seeds (default inf)
+%   options.include_singletons  : add nodes outside all research groups as singleton
+%                                 hyperedges (default true)
 
     num_nodes = numel(paper_ids);
     id_map = containers.Map(paper_ids, num2cell(1:num_nodes));
@@ -155,7 +155,7 @@ function H = build_cora_hypergraph(cites_file, paper_ids, options)
 
     fid = fopen(cites_file, 'r');
     if fid < 0
-        error('build_cora_hypergraph: 파일을 열 수 없습니다: %s', cites_file);
+        error('build_cora_hypergraph: cannot open file: %s', cites_file);
     end
     cite_pairs = textscan(fid, '%s%s');
     fclose(fid);
@@ -164,10 +164,10 @@ function H = build_cora_hypergraph(cites_file, paper_ids, options)
     citing_ids = cite_pairs{2};
 
     % -------------------------------------------------------------------
-    % 1. Citation context 수집: 피인용 논문 → 인용 논문 리스트
+    % 1. Collect citation context: cited paper -> list of citing papers
     % -------------------------------------------------------------------
-    cite_map = containers.Map();   % key: 피인용 노드 인덱스(문자열)
-                                   % val: 인용 노드 인덱스 배열
+    cite_map = containers.Map();   % key: cited node index as a string
+                                   % val: array of citing node indices
     citation_count = zeros(num_nodes, 1);
 
     for i = 1:numel(cited_ids)
@@ -187,7 +187,7 @@ function H = build_cora_hypergraph(cites_file, paper_ids, options)
     end
 
     % -------------------------------------------------------------------
-    % 2. 연구 그룹 seed 선택: 자주 인용된 논문
+    % 2. Select research-group seeds among frequently cited papers
     % -------------------------------------------------------------------
     seed_nodes = find(citation_count >= min_group_citations);
     [~, order] = sort(citation_count(seed_nodes), 'descend');
@@ -199,7 +199,7 @@ function H = build_cora_hypergraph(cites_file, paper_ids, options)
     end
 
     % -------------------------------------------------------------------
-    % 3. 연구 그룹 하이퍼엣지 생성: {seed 논문} ∪ {인용 논문들}
+    % 3. Build research-group hyperedges: {seed paper} union {citing papers}
     % -------------------------------------------------------------------
     hyperedges = cell(numel(seed_nodes), 1);
     for i = 1:numel(seed_nodes)
@@ -214,7 +214,7 @@ function H = build_cora_hypergraph(cites_file, paper_ids, options)
     end
 
     % -------------------------------------------------------------------
-    % 4. 고립 노드 처리: 연구 그룹에 속하지 않는 노드 → 싱글턴 하이퍼엣지
+    % 4. Handle isolated nodes by adding singleton hyperedges
     % -------------------------------------------------------------------
     if include_singletons
         covered = false(num_nodes, 1);
