@@ -39,7 +39,7 @@ fprintf('  Train/Val/Test : %d / %d / %d\n', ...
 %% -------------------------------------------------------------------------
 % 2. Compute the normalized propagation matrix
 % -------------------------------------------------------------------------
-[Theta_conv, D_v, D_e, W] = compute_laplacian(H);
+[Theta_conv, D_v, D_e, W] = compute_propagation_matrix(H);
 
 fprintf('\n=== Propagation matrix computed ===\n');
 

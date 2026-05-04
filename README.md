@@ -50,7 +50,7 @@ HGNN/
 │   └── cora/                       # Cora citation dataset files
 ├── graph/
 │   ├── build_incidence_matrix.m    # Constructs sparse incidence matrix H
-│   └── compute_laplacian.m         # Computes normalized propagation matrix Θ
+│   └── compute_propagation_matrix.m # Computes normalized propagation matrix Θ
 ├── model/
 │   ├── hgnn_forward.m              # 2-layer forward pass
 │   ├── hgnn_backward.m             # Backpropagation (manual gradient computation)
@@ -150,7 +150,7 @@ This converts local citation neighborhoods into higher-order groups. A single pr
 
 ### 4. Propagation Matrix
 
-`compute_laplacian.m` converts the incidence matrix `H` into the normalized HGNN propagation matrix:
+`compute_propagation_matrix.m` converts the incidence matrix `H` into the normalized HGNN propagation matrix:
 
 $$\Theta = D_v^{-1/2} \cdot H \cdot W \cdot D_e^{-1} \cdot H^\top \cdot D_v^{-1/2}$$
 
@@ -264,7 +264,7 @@ All hyperparameters are configured in `main.m`:
 - **Loss:** Cross-entropy with numerical stability (ε=1e-8)
 - **Activation:** ReLU (hidden) → Dropout (training only) → Softmax (output)
 - **Model Selection:** The returned model is selected by the lowest validation loss
-- **Sparse Operations:** Incidence matrix and Laplacian stored as MATLAB sparse matrices for memory efficiency
+- **Sparse Operations:** Incidence matrix and propagation matrix stored as MATLAB sparse matrices for memory efficiency
 - **Data Split:** Random but reproducible split with `rng(7)`: up to 20 labeled nodes per class for training, 500 validation nodes, and 1,000 test nodes
 
 ---
@@ -292,7 +292,7 @@ When presenting the code, a useful explanation order is:
 
 1. `main.m`: show the complete pipeline.
 2. `load_data.m`: explain how Cora files become `X`, `H`, `Y_true`, and masks.
-3. `compute_laplacian.m`: explain the normalized propagation matrix `Theta_conv`.
+3. `compute_propagation_matrix.m`: explain the normalized propagation matrix `Theta_conv`.
 4. `hgnn_layer.m` and `hgnn_forward.m`: explain the two-layer HGNN model.
 5. `hgnn_loss.m` and `hgnn_backward.m`: explain masked loss and manual gradients.
 6. `train.m`: explain Adam updates and validation-loss model selection.

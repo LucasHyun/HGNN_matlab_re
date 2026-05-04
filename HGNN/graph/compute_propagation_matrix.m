@@ -1,5 +1,5 @@
-function [Theta_conv, D_v, D_e, W] = compute_laplacian(H, edge_weights)
-% COMPUTE_LAPLACIAN  Compute the HGNN normalized propagation matrix
+function [Theta_conv, D_v, D_e, W] = compute_propagation_matrix(H, edge_weights)
+% COMPUTE_PROPAGATION_MATRIX  Compute the HGNN normalized propagation matrix
 %
 % Core equation:
 %   Theta_conv = D_v^(-1/2) * H * W * D_e^(-1) * H' * D_v^(-1/2)
@@ -24,7 +24,7 @@ if nargin < 2 || isempty(edge_weights)
 end
 edge_weights = edge_weights(:);
 if numel(edge_weights) ~= num_edges
-    error('compute_laplacian: edge_weights length must match the number of hyperedges.');
+    error('compute_propagation_matrix: edge_weights length must match the number of hyperedges.');
 end
 W = spdiags(edge_weights, 0, num_edges, num_edges);     % (E x E)
 

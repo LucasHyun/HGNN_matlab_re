@@ -6,7 +6,7 @@ function [X_out, cache] = hgnn_layer(X, Theta_conv, W_layer, b_layer, activation
 %
 % Inputs:
 %   X          : (N x F_in) node-feature matrix
-%   Theta_conv : (N x N) normalized propagation matrix from compute_laplacian
+%   Theta_conv : (N x N) normalized propagation matrix from compute_propagation_matrix
 %   W_layer    : (F_in x F_out) trainable weight matrix
 %   b_layer    : (1 x F_out) trainable bias row vector
 %   activation : activation name ('relu' | 'softmax' | 'none')
