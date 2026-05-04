@@ -1,13 +1,14 @@
-function [X_out, cache] = hgnn_layer(X, Theta_conv, W_layer, activation)
+function [X_out, cache] = hgnn_layer(X, Theta_conv, W_layer, b_layer, activation)
 % HGNN_LAYER  Compute one HGNN layer
 %
 % Equation:
-%   X_out = activation( Theta_conv * X * W_layer )
+%   X_out = activation( Theta_conv * (X * W_layer + b_layer) )
 %
 % Inputs:
 %   X          : (N x F_in) node-feature matrix
 %   Theta_conv : (N x N) normalized propagation matrix from compute_laplacian
 %   W_layer    : (F_in x F_out) trainable weight matrix
+%   b_layer    : (1 x F_out) trainable bias row vector
 %   activation : activation name ('relu' | 'softmax' | 'none')
 %                Defaults to 'relu' when omitted.
 %
@@ -15,21 +16,24 @@ function [X_out, cache] = hgnn_layer(X, Theta_conv, W_layer, activation)
 %   X_out : (N x F_out) output node-feature matrix
 %   cache : intermediate values needed for backpropagation
 
-if nargin < 4
+if nargin < 4 || isempty(b_layer)
+    b_layer = zeros(1, size(W_layer, 2));
+end
+if nargin < 5
     activation = 'relu';
 end
 
 % -----------------------------------------------------------------------
-% 1. Graph propagation: aggregate neighborhood information
-%    AX = Theta_conv * X   ->  (N x F_in)
+% 1. Linear transform: change the feature dimension
+%    XW_plus_b = X * W_layer + b_layer  ->  (N x F_out)
 % -----------------------------------------------------------------------
-AX = Theta_conv * X;
+XW_plus_b = bsxfun(@plus, X * W_layer, b_layer);
 
 % -----------------------------------------------------------------------
-% 2. Linear transform: change the feature dimension
-%    Z = AX * W_layer       ->  (N x F_out)
+% 2. Graph propagation: aggregate hypergraph neighborhood information
+%    Z = Theta_conv * XW_plus_b         ->  (N x F_out)
 % -----------------------------------------------------------------------
-Z = AX * W_layer;
+Z = Theta_conv * XW_plus_b;
 
 % -----------------------------------------------------------------------
 % 3. Apply the activation function
@@ -55,10 +59,11 @@ end
 % 4. Store cache values for backpropagation
 % -----------------------------------------------------------------------
 cache.X          = X;
-cache.AX         = AX;
+cache.XW_plus_b  = XW_plus_b;
 cache.Z          = Z;
 cache.X_out      = X_out;
 cache.W_layer    = W_layer;
+cache.b_layer    = b_layer;
 cache.Theta_conv = Theta_conv;
 cache.activation = activation;
 

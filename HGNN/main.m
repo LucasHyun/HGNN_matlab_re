@@ -50,14 +50,18 @@ params.lr           = 0.01;
 params.epochs       = 200;
 params.hidden_dim   = 64;
 params.weight_decay = 5e-4;
+params.dropout      = 0.5;
 params.print_every  = 10;
 
 %% -------------------------------------------------------------------------
 % 4. Train
 % -------------------------------------------------------------------------
 fprintf('\n=== Training started ===\n');
-weights = train(X, Theta_conv, Y_true, train_mask, val_mask, params);
+% train returns the weights from the epoch with the lowest validation loss.
+[weights, history] = train(X, Theta_conv, Y_true, train_mask, val_mask, params);
 fprintf('=== Training completed ===\n');
+fprintf('Best validation loss: %.4f at epoch %d\n', ...
+        history.best_val_loss, history.best_epoch);
 
 %% -------------------------------------------------------------------------
 % 5. Evaluate on the test split

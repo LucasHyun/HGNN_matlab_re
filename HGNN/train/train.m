@@ -1,4 +1,4 @@
-function weights = train(X, Theta_conv, Y_true, train_mask, val_mask, params)
+function [weights, history] = train(X, Theta_conv, Y_true, train_mask, val_mask, params)
 % TRAIN  HGNN training loop
 %
 % Inputs:
@@ -12,9 +12,11 @@ function weights = train(X, Theta_conv, Y_true, train_mask, val_mask, params)
 %       .epochs      : number of epochs (default 200)
 %       .hidden_dim  : hidden-layer dimension (default 64)
 %       .weight_decay: L2 regularization coefficient (default 5e-4)
+%       .dropout     : hidden-layer dropout probability (default 0.5)
 %
 % Outputs:
-%   weights : trained weight struct (.W1, .W2)
+%   weights : best validation-loss weight struct (.W1, .b1, .W2, .b2)
+%   history : training/validation metrics and best epoch metadata
 
 % -----------------------------------------------------------------------
 % 0. Set default hyperparameters
@@ -25,6 +27,7 @@ epochs       = getfield_default(params, 'epochs',       200);
 hidden_dim   = getfield_default(params, 'hidden_dim',   64);
 weight_decay = getfield_default(params, 'weight_decay', 5e-4);
 print_every  = getfield_default(params, 'print_every',  10);
+dropout      = getfield_default(params, 'dropout',      0.5);
 
 [~, F_in] = size(X);
 [~, C]    = size(Y_true);
@@ -33,10 +36,23 @@ print_every  = getfield_default(params, 'print_every',  10);
 % 1. Initialize weights with Xavier initialization
 % -----------------------------------------------------------------------
 weights.W1 = xavier_init(F_in, hidden_dim);
+weights.b1 = zeros(1, hidden_dim);
 weights.W2 = xavier_init(hidden_dim, C);
+weights.b2 = zeros(1, C);
 
 % Initialize Adam optimizer state (TODO: add SGD selection if needed).
 adam = init_adam(weights);
+
+best_weights = weights;
+best_val_loss = inf;
+best_epoch = 0;
+
+history.train_loss = zeros(epochs, 1);
+history.val_loss = zeros(epochs, 1);
+history.train_acc = zeros(epochs, 1);
+history.val_acc = zeros(epochs, 1);
+history.best_epoch = best_epoch;
+history.best_val_loss = best_val_loss;
 
 % -----------------------------------------------------------------------
 % 2. Training loop
@@ -44,10 +60,11 @@ adam = init_adam(weights);
 for epoch = 1:epochs
 
     % --- Forward pass ---
-    [Y_pred, caches] = hgnn_forward(X, Theta_conv, weights);
+    train_params.dropout = dropout;
+    [Y_pred, caches] = hgnn_forward(X, Theta_conv, weights, true, train_params);
 
     % --- Loss calculation on training nodes only ---
-    [loss, dY] = hgnn_loss(Y_pred, Y_true, train_mask);
+    [~, dY] = hgnn_loss(Y_pred, Y_true, train_mask);
 
     % --- Backward pass (gradient calculation) ---
     grads = hgnn_backward(dY, caches, Theta_conv, weights);
@@ -59,15 +76,35 @@ for epoch = 1:epochs
     % --- Weight update with Adam ---
     [weights, adam] = adam_update(weights, grads, adam, lr, epoch);
 
+    % --- Evaluate without dropout and keep the best validation-loss model ---
+    [Y_eval_pred, ~] = hgnn_forward(X, Theta_conv, weights, false, train_params);
+    [train_loss, ~] = hgnn_loss(Y_eval_pred, Y_true, train_mask);
+    [val_loss, ~] = hgnn_loss(Y_eval_pred, Y_true, val_mask);
+    train_acc = evaluate(Y_eval_pred, Y_true, train_mask);
+    val_acc = evaluate(Y_eval_pred, Y_true, val_mask);
+
+    history.train_loss(epoch) = train_loss;
+    history.val_loss(epoch) = val_loss;
+    history.train_acc(epoch) = train_acc;
+    history.val_acc(epoch) = val_acc;
+
+    if val_loss < best_val_loss
+        best_val_loss = val_loss;
+        best_weights = weights;
+        best_epoch = epoch;
+    end
+
     % --- Print validation metrics ---
     if mod(epoch, print_every) == 0
-        [Y_val_pred, ~] = hgnn_forward(X, Theta_conv, weights);
-        train_acc = evaluate(Y_val_pred, Y_true, train_mask);
-        val_acc = evaluate(Y_val_pred, Y_true, val_mask);
-        fprintf('Epoch %3d | Loss: %.4f | Train Acc: %.4f | Val Acc: %.4f\n', ...
-                epoch, loss, train_acc, val_acc);
+        fprintf(['Epoch %3d | Train Loss: %.4f | Val Loss: %.4f | ' ...
+                 'Train Acc: %.4f | Val Acc: %.4f | Best Epoch: %d\n'], ...
+                epoch, train_loss, val_loss, train_acc, val_acc, best_epoch);
     end
 end
+
+weights = best_weights;
+history.best_epoch = best_epoch;
+history.best_val_loss = best_val_loss;
 
 end
 
@@ -80,17 +117,19 @@ function W = xavier_init(fan_in, fan_out)
 end
 
 function adam = init_adam(weights)
-    adam.m.W1 = zeros(size(weights.W1));
-    adam.m.W2 = zeros(size(weights.W2));
-    adam.v.W1 = zeros(size(weights.W1));
-    adam.v.W2 = zeros(size(weights.W2));
+    fields = fieldnames(weights);
+    for i = 1:length(fields)
+        f = fields{i};
+        adam.m.(f) = zeros(size(weights.(f)));
+        adam.v.(f) = zeros(size(weights.(f)));
+    end
     adam.beta1 = 0.9;
     adam.beta2 = 0.999;
     adam.eps   = 1e-8;
 end
 
 function [weights, adam] = adam_update(weights, grads, adam, lr, t)
-    fields = {'W1', 'W2'};
+    fields = fieldnames(weights);
     for i = 1:length(fields)
         f = fields{i};
         adam.m.(f) = adam.beta1 * adam.m.(f) + (1-adam.beta1) * grads.(f);

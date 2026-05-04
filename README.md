@@ -14,14 +14,17 @@ Input Features (X)
        ▼
 ┌──────────────────────────┐
 │  HGNN Layer 1            │
-│  ReLU( Θ · X · W₁ )     │
+│  ReLU( Θ · (XW₁+b₁) )   │
 │  (N×F_in) → (N×hidden)   │
 └──────────────────────────┘
        │
        ▼
+ Dropout (training only)
+       │
+       ▼
 ┌──────────────────────────┐
 │  HGNN Layer 2            │
-│  Softmax( Θ · H₁ · W₂ ) │
+│  Softmax( Θ · (H₁W₂+b₂))│
 │  (N×hidden) → (N×C)      │
 └──────────────────────────┘
        │
@@ -54,7 +57,7 @@ HGNN/
 │   ├── hgnn_layer.m                # Single HGNN layer (propagation + activation)
 │   └── hgnn_loss.m                 # Cross-entropy loss with mask support
 └── train/
-    ├── train.m                     # Training loop with Adam optimizer
+    ├── train.m                     # Training loop with Adam and best-val-loss checkpointing
     ├── evaluate.m                  # Classification accuracy evaluation
     └── validate.m                  # Validation wrapper
 ```
@@ -79,8 +82,9 @@ Open MATLAB, navigate to the project root, and execute:
 This will:
 1. Load the **Cora** citation dataset (2,708 nodes, 7 classes)
 2. Build the incidence matrix and compute the normalized propagation matrix
-3. Train the HGNN for 200 epochs with Adam optimizer
-4. Report the final test accuracy
+3. Train the HGNN for 200 epochs with Adam optimizer and dropout
+4. Select the model with the lowest validation loss
+5. Report the final test accuracy with the best-validation-loss model
 
 ### Expected Output
 
@@ -95,10 +99,11 @@ This will:
 === Propagation matrix computed ===
 
 === Training started ===
-Epoch  10 | Loss: x.xxxx | Train Acc: x.xxxx | Val Acc: x.xxxx
+Epoch  10 | Train Loss: x.xxxx | Val Loss: x.xxxx | Train Acc: x.xxxx | Val Acc: x.xxxx | Best Epoch: x
 ...
-Epoch 200 | Loss: x.xxxx | Train Acc: x.xxxx | Val Acc: x.xxxx
+Epoch 200 | Train Loss: x.xxxx | Val Loss: x.xxxx | Train Acc: x.xxxx | Val Acc: x.xxxx | Best Epoch: x
 === Training completed ===
+Best validation loss: x.xxxx at epoch x
 
 === Final test accuracy: x.xxxx ===
 ```
@@ -163,29 +168,33 @@ The normalization prevents high-degree nodes or large hyperedges from dominating
 The model is a two-layer HGNN:
 
 ```matlab
-H1     = ReLU(Theta_conv * X  * W1)
-Y_pred = Softmax(Theta_conv * H1 * W2)
+H1     = ReLU(Theta_conv * (X  * W1 + b1))
+H1     = Dropout(H1)          % training only
+Y_pred = Softmax(Theta_conv * (H1 * W2 + b2))
 ```
 
-`hgnn_layer.m` handles one layer by applying hypergraph propagation, a learnable linear transform, and an activation. `hgnn_forward.m` chains two layers and returns both predictions and cached intermediate values for backpropagation.
+`hgnn_layer.m` handles one layer by applying a learnable linear transform with bias, hypergraph propagation, and an activation. `hgnn_forward.m` chains two layers, applies inverted dropout to the hidden representation during training only, and returns both predictions and cached intermediate values for backpropagation.
 
 ### 6. Training Loop
 
 `train.m` performs manual training without a deep learning toolbox:
 
-1. Initialize `W1` and `W2` with Xavier initialization.
-2. Run the forward pass.
+1. Initialize `W1` and `W2` with Xavier initialization and initialize `b1`, `b2` to zero.
+2. Run the training forward pass with dropout enabled.
 3. Compute masked cross-entropy loss on `train_mask` nodes only.
 4. Run `hgnn_backward.m` to compute gradients.
-5. Add L2 weight-decay gradients.
-6. Update weights with Adam.
-7. Print train and validation accuracy every `print_every` epochs.
+5. Add L2 weight-decay gradients to the weight matrices.
+6. Update weights and biases with Adam.
+7. Run an evaluation forward pass with dropout disabled.
+8. Compute train/validation loss and accuracy.
+9. Save the weights whenever validation loss reaches a new minimum.
+10. Print train/validation metrics every `print_every` epochs.
 
-Validation nodes are never used to compute the training loss. They are only used for progress reporting during training.
+Validation nodes are never used to compute the training loss. They are used for model selection: `train.m` returns the weights from the epoch with the lowest validation loss, not necessarily the final epoch.
 
 ### 7. Final Evaluation
 
-After training, `main.m` runs one final forward pass and calls `evaluate.m` with `test_mask`. The reported test accuracy is therefore computed only on the held-out test nodes.
+After training, `main.m` runs one final forward pass with the best-validation-loss weights and calls `evaluate.m` with `test_mask`. The reported test accuracy is therefore computed only on the held-out test nodes.
 
 ---
 
@@ -242,6 +251,7 @@ All hyperparameters are configured in `main.m`:
 | `epochs` | 200 | Number of training epochs |
 | `hidden_dim` | 64 | Hidden layer dimension |
 | `weight_decay` | 5e-4 | L2 regularization coefficient |
+| `dropout` | 0.5 | Hidden-layer dropout probability used during training only |
 | `print_every` | 10 | Logging interval (epochs) |
 
 ---
@@ -249,11 +259,44 @@ All hyperparameters are configured in `main.m`:
 ## Implementation Details
 
 - **Weight Initialization:** Xavier initialization for stable gradient flow
+- **Bias Terms:** Each HGNN layer uses a trainable bias (`b1`, `b2`) before hypergraph propagation, matching the reference `HGNN_conv` structure more closely
 - **Optimizer:** Adam (β₁=0.9, β₂=0.999, ε=1e-8)
 - **Loss:** Cross-entropy with numerical stability (ε=1e-8)
-- **Activation:** ReLU (hidden) → Softmax (output)
+- **Activation:** ReLU (hidden) → Dropout (training only) → Softmax (output)
+- **Model Selection:** The returned model is selected by the lowest validation loss
 - **Sparse Operations:** Incidence matrix and Laplacian stored as MATLAB sparse matrices for memory efficiency
-- **Data Split:** 20 labeled nodes per class for training, 500 for validation, 1,000 for testing (following the standard Cora split protocol)
+- **Data Split:** Random but reproducible split with `rng(7)`: up to 20 labeled nodes per class for training, 500 validation nodes, and 1,000 test nodes
+
+---
+
+## Differences from the Reference HGNN Code
+
+This repository follows the same core HGNN propagation equation as the reference implementation, but it is adapted to a MATLAB/Cora demo setting:
+
+| Topic | Reference HGNN | This MATLAB implementation |
+|-------|----------------|----------------------------|
+| Data | ModelNet40 / NTU feature files | Cora citation dataset |
+| Hyperedge construction | KNN over feature vectors | Citation-based research groups |
+| Layer computation | `G * (XW + b)` | `Theta_conv * (XW + b)` |
+| Dropout | After the first ReLU during training | After the first ReLU during training |
+| Loss interface | Logits + framework cross-entropy | Softmax probabilities + manual cross-entropy |
+| Best model | Usually selected by validation accuracy in the original training script | Selected by lowest validation loss |
+
+The most important conceptual difference is the hypergraph construction. The HGNN layer formula is aligned with the reference, but the Cora demo builds hyperedges from citation context rather than K-nearest-neighbor feature similarity.
+
+---
+
+## Demo Notes
+
+When presenting the code, a useful explanation order is:
+
+1. `main.m`: show the complete pipeline.
+2. `load_data.m`: explain how Cora files become `X`, `H`, `Y_true`, and masks.
+3. `compute_laplacian.m`: explain the normalized propagation matrix `Theta_conv`.
+4. `hgnn_layer.m` and `hgnn_forward.m`: explain the two-layer HGNN model.
+5. `hgnn_loss.m` and `hgnn_backward.m`: explain masked loss and manual gradients.
+6. `train.m`: explain Adam updates and validation-loss model selection.
+7. `evaluate.m`: explain final test accuracy on `test_mask`.
 
 ---
 
